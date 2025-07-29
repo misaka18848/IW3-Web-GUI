@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IW3WebGUI</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #f5f5f5;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+        }
+        
+        /* 背景图容器 */
+        .background-container {
+            position: fixed;
+            top: 0;
+            left: 0; 
+            height: 100vh;
+            width: auto;
+            z-index: -1;
+            overflow: hidden;
+        }
+        
+        /* 背景图 */
+        .background-image {
+            height: 100%;
+            width: auto;
+            object-fit: cover;
+            object-position: center;
+            opacity: 0.3;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            flex: 1;
+        }
+        
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+        }
+        
+        .upload-section {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            border: 2px dashed #ddd;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #555;
+            font-weight: bold;
+        }
+        
+        input[type="file"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background: white;
+        }
+        
+        input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        
+        button {
+            background: #007bff;
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background 0.3s;
+        }
+        
+        button:hover {
+            background: #0056b3;
+        }
+        
+        .status-section {
+            margin: 20px 0;
+            padding: 15px;
+            background: #e9ecef;
+            border-radius: 8px;
+        }
+        
+        .file-list {
+            margin: 20px 0;
+        }
+        
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            background: #f8f9fa;
+            margin: 10px 0;
+            border-radius: 5px;
+            border-left: 4px solid #007bff;
+        }
+        
+        .file-item.converted {
+            border-left-color: #28a745;
+        }
+        
+        .file-actions {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .btn-secondary {
+            background: #6c757d;
+        }
+        
+        .btn-success {
+            background: #28a745;
+        }
+        
+        .btn-danger {
+            background: #dc3545;
+        }
+        
+        .flash-messages {
+            margin: 20px 0;
+        }
+        
+        .flash-message {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .container {
+                margin: 10px;
+                padding: 20px;
+            }
+            
+            h1 {
+                font-size: 2em;
+            }
+            
+            .background-container {
+                display: none; /* 在小屏幕上隐藏背景图 */
+            }
+        }
+    </style>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- 背景图容器 -->
+    <div class="background-container">
+        <img src="{{ url_for('static', filename='images/background.png') }}" 
+             alt="背景图" 
+             class="background-image">
+    </div>
+    
+    <div class="container">
+        <h1>🎥 IW3WebGUI</h1>
+        
+        <!-- 闪现消息 -->
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                <div class="flash-messages">
+                    {% for message in messages %}
+                        <div class="flash-message">{{ message }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+        
+        <!-- 上传区域 -->
+        <div class="upload-section">
+            <form method="POST" enctype="multipart/form-data">
+                <div class="form-group">
+                    <label for="file">选择视频文件</label>
+                    <input type="file" name="file" id="file" accept=".mp4,.avi,.mkv" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="additional_args">IW3额外参数（可选）</label>
+                    <input type="text" name="additional_args" id="additional_args" 
+                           placeholder="例如: --depth-model Any_V2_S" 
+                           value="{{ additional_args }}">
+                </div>
+                
+                <button type="submit">上传并转换</button>
+            </form>
+        </div>
+        
+        <!-- 处理状态 -->
+        <div class="status-section">
+            <h3>处理状态</h3>
+            <p><strong>当前状态:</strong> {{ status_info.current_status }}</p>
+            {% if status_info.current_file %}
+                <p><strong>当前文件:</strong> {{ status_info.current_file }}</p>
+            {% endif %}
+        </div>
+        
+        <!-- 已上传文件列表 -->
+        {% if status_info.uploaded_files %}
+            <div class="file-list">
+                <h3>待转换文件</h3>
+                {% for filename in status_info.uploaded_files %}
+                    <div class="file-item">
+                        <span>{{ filename }}</span>
+                        <div class="file-actions">
+                            <a href="{{ url_for('delete_uploaded', filename=filename) }}" 
+                               class="btn btn-danger" style="color: white; text-decoration: none;">删除</a>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+        
+        <!-- 已转换文件列表 -->
+        {% if status_info.converted_files %}
+            <div class="file-list">
+                <h3>已转换文件</h3>
+                {% for filename in status_info.converted_files %}
+                    <div class="file-item converted">
+                        <span>{{ filename }}</span>
+                        <div class="file-actions">
+                            <a href="{{ url_for('download_converted', filename=filename) }}" 
+                               class="btn btn-success" style="color: white; text-decoration: none;">下载</a>
+                            <a href="{{ url_for('delete_converted', filename=filename) }}" 
+                               class="btn btn-danger" style="color: white; text-decoration: none;">删除</a>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    </div>
+
+    <!-- GitHub 水印链接（带图标） -->
+    <a href="https://github.com/misaka18848" target="_blank" 
+    style="position: fixed; bottom: 10px; right: 10px; 
+            color: rgba(255, 255, 255, 0.8); 
+            font-size: 14px; 
+            text-decoration: none; 
+            z-index: 1000; 
+            pointer-events: auto; 
+            display: flex; 
+            align-items: center; 
+            background-color: rgba(0, 0, 0, 0.5); 
+            padding: 3px 8px; 
+            border-radius: 4px; 
+            ">
+    <i class="fab fa-github fa-sm" style="margin-right: 5px;"></i> <!-- GitHub 图标 -->
+    misaka18848
+    </a>
+</body>
+</html>
