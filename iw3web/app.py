@@ -324,4 +324,4 @@ if __name__ == '__main__':
     worker_thread.start()
     
     # 禁用Flask多线程，使用单线程模式
-    app.run(debug=True, threaded=False,port=8000)
+    app.run(host='0.0.0.0', debug=True, threaded=False,port=8000)
