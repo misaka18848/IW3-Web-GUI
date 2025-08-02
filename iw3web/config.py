@@ -23,11 +23,12 @@ class Config:
     ONEDRIVE_FOLDER_PATH = '/IW3Converted'  # 也可以是 '/Shared Documents/IW3Converted' 等
 
     # Microsoft Graph API 的基础 URL
-    GRAPH_API_BASE_URL = 'https://graph.microsoft.com/v1.0'
+    GRAPH_API_BASE_URL = 'https://graph.microsoft.com/v1.0' #这个不用改
 
     # Token 存储路径 (用于持久化刷新Token)
     TOKEN_PATH = os.path.join(os.path.dirname(__file__), 'onedrive_token.json')
 
 # 确保目录存在
 os.makedirs(Config.UPLOAD_FOLDER, exist_ok=True)
+
 os.makedirs(Config.CONVERTED_FOLDER, exist_ok=True)
