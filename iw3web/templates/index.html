@@ -107,6 +107,11 @@
             background: #0056b3;
         }
         
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
         .status-section {
             margin: 20px 0;
             padding: 15px;
@@ -163,6 +168,31 @@
             border: 1px solid #c3e6cb;
         }
         
+        /* 上传进度条 */
+        .upload-progress {
+            width: 100%;
+            height: 20px;
+            background: #e9ecef;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 10px;
+            display: none; /* 初始隐藏 */
+        }
+        
+        .progress-bar {
+            height: 100%;
+            width: 0%;
+            background: #28a745;
+            transition: width 0.3s ease;
+        }
+        
+        .progress-text {
+            text-align: center;
+            font-size: 14px;
+            color: #666;
+            margin-top: 5px;
+        }
+        
         /* 响应式设计 */
         @media (max-width: 768px) {
             .container {
@@ -192,7 +222,7 @@
     <div class="container">
         <h1>🎥 IW3WebGUI</h1>
         
-        <!-- 闪现消息 -->
+        <!-- 闪现消息 (仅用于初始错误，上传错误由JS处理) -->
         {% with messages = get_flashed_messages() %}
             {% if messages %}
                 <div class="flash-messages">
@@ -203,67 +233,90 @@
             {% endif %}
         {% endwith %}
         
-        <!-- 上传区域 -->
-        <div class="upload-section">
-            <form method="POST" enctype="multipart/form-data">
-                <div class="form-group">
-                    <label for="file">选择视频文件</label>
-                    <input type="file" name="file" id="file" accept=".mp4,.avi,.mkv" required>
-                </div>
-                
-                <div class="form-group">
-                    <label for="additional_args">IW3额外参数（可选）</label>
-                    <input type="text" name="additional_args" id="additional_args" 
-                           placeholder="例如: --depth-model Any_V2_S" 
-                           value="{{ additional_args }}">
-                </div>
-                
-                <button type="submit">上传并转换</button>
-            </form>
+    <!-- 上传区域 -->
+    <div class="upload-section">
+        <div class="form-group">
+            <label for="uploadMethod">上传方式</label>
+            <select id="uploadMethod" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
+                <option value="file">本地文件上传</option>
+                <option value="url">直链上传</option>
+            </select>
         </div>
+
+        <!-- 本地文件上传区域 -->
+        <div id="fileUploadGroup">
+            <div class="form-group">
+                <label for="file">选择视频文件</label>
+                <input type="file" name="file" id="file" accept=".mp4,.avi,.mkv" required>
+            </div>
+        </div>
+
+        <!-- 直链上传区域 -->
+        <div id="urlUploadGroup" style="display: none;">
+            <div class="form-group">
+                <label for="directUrl">文件直链</label>
+                <input type="url" name="directUrl" id="directUrl" placeholder="https://example.com/video.mp4" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
+            </div>
+            <div class="form-group">
+                <label for="customFilename">自定义文件名（可选）</label>
+                <input type="text" name="customFilename" id="customFilename" placeholder="video.mp4" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
+            </div>
+        </div>
+        
+        <div class="form-group">
+            <label for="additional_args">IW3额外参数（可选）</label>
+            <input type="text" name="additional_args" id="additional_args" 
+                placeholder="例如: --depth-model Any_V2_S" 
+                value="{{ additional_args }}">
+        </div>
+        
+        <button type="button" id="uploadBtn">上传并转换</button>
+
+        <!-- 上传进度条 -->
+        <div class="upload-progress" id="uploadProgress">
+            <div class="progress-bar" id="progressBar"></div>
+        </div>
+        <div class="progress-text" id="progressText"></div>
+    </div>
         
         <!-- 处理状态 -->
         <div class="status-section">
             <h3>处理状态</h3>
-            <p><strong>当前状态:</strong> {{ status_info.current_status }}</p>
-            {% if status_info.current_file %}
-                <p><strong>当前文件:</strong> {{ status_info.current_file }}</p>
-            {% endif %}
+            <p><strong>当前状态:</strong> <span id="currentStatus">{{ status_info.current_status }}</span></p>
+            <p><strong>当前文件:</strong> <span id="currentFile">{{ status_info.current_file or '无' }}</span></p>
         </div>
         
         <!-- 已上传文件列表 -->
-        {% if status_info.uploaded_files %}
-            <div class="file-list">
-                <h3>待转换文件</h3>
-                {% for filename in status_info.uploaded_files %}
-                    <div class="file-item">
-                        <span>{{ filename }}</span>
-                        <div class="file-actions">
-                            <a href="{{ url_for('delete_uploaded', filename=filename) }}" 
-                               class="btn btn-danger" style="color: white; text-decoration: none;">删除</a>
-                        </div>
+        <div class="file-list" id="uploadedFilesList">
+            <h3>待转换文件</h3>
+            <!-- 列表内容将由 JavaScript 动态生成 -->
+            {% for filename in status_info.uploaded_files %}
+                <div class="file-item">
+                    <span>{{ filename }}</span>
+                    <div class="file-actions">
+                        <a href="{{ url_for('delete_uploaded', filename=filename) }}" 
+                           class="btn btn-danger" style="color: white; text-decoration: none;">删除</a>
                     </div>
-                {% endfor %}
-            </div>
-        {% endif %}
+                </div>
+            {% endfor %}
+        </div>
         
         <!-- 已转换文件列表 -->
-        {% if status_info.converted_files %}
-            <div class="file-list">
-                <h3>已转换文件</h3>
-                {% for filename in status_info.converted_files %}
-                    <div class="file-item converted">
-                        <span>{{ filename }}</span>
-                        <div class="file-actions">
-                            <a href="{{ url_for('download_converted', filename=filename) }}" 
-                               class="btn btn-success" style="color: white; text-decoration: none;">下载</a>
-                            <a href="{{ url_for('delete_converted', filename=filename) }}" 
-                               class="btn btn-danger" style="color: white; text-decoration: none;">删除</a>
-                        </div>
+        <div class="file-list" id="convertedFilesList">
+            <h3>已转换文件</h3>
+            <!-- 列表内容将由 JavaScript 动态生成 -->
+            {% for filename in status_info.converted_files %}
+                <div class="file-item converted">
+                    <span>{{ filename }}</span>
+                    <div class="file-actions">
+                        <a href="{{ url_for('download_converted', filename=filename) }}" 
+                           class="btn btn-success" style="color: white; text-decoration: none;">下载</a>
+                        <a href="{{ url_for('delete_converted', filename=filename) }}" 
+                           class="btn btn-danger" style="color: white; text-decoration: none;">删除</a>
                     </div>
-                {% endfor %}
-            </div>
-        {% endif %}
+                </div>
+            {% endfor %}
+        </div>
     </div>
 
     <!-- GitHub 水印链接（带图标） -->
@@ -283,5 +336,282 @@
     <i class="fab fa-github fa-sm" style="margin-right: 5px;"></i> <!-- GitHub 图标 -->
     misaka18848
     </a>
+
+<!-- ✅ 新增: JavaScript 逻辑 -->
+<script>
+// DOM 元素引用
+const fileInput = document.getElementById('file');
+const uploadBtn = document.getElementById('uploadBtn');
+const additionalArgsInput = document.getElementById('additional_args');
+const uploadProgress = document.getElementById('uploadProgress');
+const progressBar = document.getElementById('progressBar');
+const progressText = document.getElementById('progressText');
+const currentStatusSpan = document.getElementById('currentStatus');
+const currentFileSpan = document.getElementById('currentFile');
+const uploadedFilesList = document.getElementById('uploadedFilesList');
+const convertedFilesList = document.getElementById('convertedFilesList');
+
+// 上传方式选择
+const uploadMethodSelect = document.getElementById('uploadMethod');
+const fileUploadGroup = document.getElementById('fileUploadGroup');
+const urlUploadGroup = document.getElementById('urlUploadGroup');
+
+// 分块大小 (1MB)
+const CHUNK_SIZE = 1024 * 1024;
+
+// 全局 session_id（用于分块上传）
+let sessionId = null;
+
+// 切换上传方式
+uploadMethodSelect.addEventListener('change', function () {
+    if (this.value === 'file') {
+        fileUploadGroup.style.display = 'block';
+        urlUploadGroup.style.display = 'none';
+        fileInput.required = true;
+        document.getElementById('directUrl').required = false;
+    } else {
+        fileUploadGroup.style.display = 'none';
+        urlUploadGroup.style.display = 'block';
+        fileInput.required = false;
+        document.getElementById('directUrl').required = true;
+    }
+});
+
+// 上传主函数
+async function uploadFile() {
+    const method = uploadMethodSelect.value;
+
+    // 重置 session_id（新任务）
+    sessionId = null;
+
+    if (method === 'file') {
+        // ========== 本地文件上传（分块） ==========
+        const file = fileInput.files[0];
+        if (!file) {
+            alert('请先选择一个文件');
+            return;
+        }
+
+        // 校验文件类型
+        const fileExtension = file.name.split('.').pop().toLowerCase();
+        if (!['mp4', 'avi', 'mkv'].includes(fileExtension)) {
+            alert(`不支持的文件格式: .${fileExtension}\n\n仅支持：.mp4, .avi, .mkv`);
+            return;
+        }
+
+        // 禁用 UI
+        uploadBtn.disabled = true;
+        uploadBtn.textContent = '上传中...';
+        fileInput.disabled = true;
+        additionalArgsInput.disabled = true;
+        uploadMethodSelect.disabled = true;
+
+        // 显示进度条
+        uploadProgress.style.display = 'block';
+        progressText.textContent = '准备上传...';
+
+        try {
+            const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+            let uploadedChunks = 0;
+
+            for (let i = 0; i < totalChunks; i++) {
+                const start = i * CHUNK_SIZE;
+                const end = Math.min(start + CHUNK_SIZE, file.size);
+                const chunk = file.slice(start, end);
+
+                const formData = new FormData();
+                formData.append('chunk', chunk);
+                formData.append('filename', file.name);
+                formData.append('chunk_index', i);
+                formData.append('total_chunks', totalChunks);
+                formData.append('additional_args', additionalArgsInput.value);
+
+                if (sessionId) {
+                    formData.append('session_id', sessionId);
+                }
+
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(result.error || '上传失败');
+                }
+
+                if (!sessionId && result.session_id) {
+                    sessionId = result.session_id;
+                }
+
+                uploadedChunks++;
+                const percent = Math.round((uploadedChunks / totalChunks) * 100);
+                progressBar.style.width = `${percent}%`;
+                progressText.textContent = `上传中: ${uploadedChunks}/${totalChunks} (${percent}%)`;
+            }
+
+            alert('文件上传成功，已加入转换队列！');
+            resetUploadUI();
+            fetchStatusAndFiles();
+
+        } catch (error) {
+            console.error('上传错误:', error);
+            alert(`上传失败: ${error.message}`);
+            resetUploadUI();
+        }
+
+    } else if (method === 'url') {
+        // ========== 直链上传 ==========
+        const directUrl = document.getElementById('directUrl').value.trim();
+        let filename = document.getElementById('customFilename').value.trim();
+
+        if (!directUrl) {
+            alert('请输入文件直链');
+            return;
+        }
+
+        // 解析文件名（若未自定义）
+        if (!filename) {
+            const urlParts = directUrl.split('/');
+            filename = decodeURIComponent(urlParts[urlParts.length - 1]);
+
+            // 去除查询参数
+            filename = filename.split('?')[0].split('#')[0];
+            if (!filename) {
+                alert('无法从链接中解析出有效的文件名');
+                return;
+            }
+        }
+
+        // 提取扩展名并小写化
+        const fileExt = filename.split('.').pop().toLowerCase();
+
+        // ✅ 严格校验扩展名
+        if (!['mp4', 'avi', 'mkv'].includes(fileExt)) {
+            alert(`不支持的文件格式: .${fileExt}\n\n仅支持以下格式：\n.mp4, .avi, .mkv`);
+            return;
+        }
+
+        // 禁用 UI
+        uploadBtn.disabled = true;
+        uploadBtn.textContent = '正在添加直链任务...';
+        uploadMethodSelect.disabled = true;
+        additionalArgsInput.disabled = true;
+
+        try {
+            const response = await fetch('/upload_direct', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    url: directUrl,
+                    filename: filename,
+                    additional_args: additionalArgsInput.value
+                })
+            });
+
+            const result = await response.json();
+
+            if (response.ok) {
+                alert('✅ 直链任务已添加，正在后台下载并排队转换！');
+                resetUploadUI();
+                fetchStatusAndFiles();
+            } else {
+                throw new Error(result.error || '提交失败');
+            }
+        } catch (error) {
+            console.error('直链上传错误:', error);
+            alert(`提交失败: ${error.message}`);
+        } finally {
+            uploadBtn.disabled = false;
+            uploadBtn.textContent = '上传并转换';
+            uploadMethodSelect.disabled = false;
+            additionalArgsInput.disabled = false;
+        }
+    }
+}
+
+// 重置上传界面
+function resetUploadUI() {
+    uploadBtn.disabled = false;
+    uploadBtn.textContent = '上传并转换';
+    fileInput.disabled = false;
+    additionalArgsInput.disabled = false;
+    uploadMethodSelect.disabled = false;
+    fileInput.value = '';
+    sessionId = null;
+    uploadProgress.style.display = 'none';
+    progressBar.style.width = '0%';
+    progressText.textContent = '';
+}
+
+// 绑定上传按钮
+uploadBtn.addEventListener('click', uploadFile);
+
+// 获取状态和文件列表
+async function fetchStatusAndFiles() {
+    try {
+        const response = await fetch('/api/status');
+        if (response.ok) {
+            const data = await response.json();
+
+            currentStatusSpan.textContent = data.current_status || '空闲';
+            currentFileSpan.textContent = data.current_file || '无';
+
+            // 渲染待转换文件
+            uploadedFilesList.innerHTML = '<h3>待转换文件</h3>';
+            if (data.uploaded_files && data.uploaded_files.length > 0) {
+                data.uploaded_files.forEach(filename => {
+                    const fileItem = document.createElement('div');
+                    fileItem.className = 'file-item';
+                    fileItem.innerHTML = `
+                        <span>${filename}</span>
+                        <div class="file-actions">
+                            <a href="/delete_uploaded/${encodeURIComponent(filename)}" 
+                               class="btn btn-danger" style="color: white; text-decoration: none;">删除</a>
+                        </div>
+                    `;
+                    uploadedFilesList.appendChild(fileItem);
+                });
+            } else {
+                uploadedFilesList.innerHTML += '<p>没有待转换的文件。</p>';
+            }
+
+            // 渲染已转换文件
+            convertedFilesList.innerHTML = '<h3>已转换文件</h3>';
+            if (data.converted_files && data.converted_files.length > 0) {
+                data.converted_files.forEach(filename => {
+                    const fileItem = document.createElement('div');
+                    fileItem.className = 'file-item converted';
+                    fileItem.innerHTML = `
+                        <span>${filename}</span>
+                        <div class="file-actions">
+                            <a href="/download/${encodeURIComponent(filename)}" 
+                               class="btn btn-success" style="color: white; text-decoration: none;">下载</a>
+                            <a href="/delete/converted/${encodeURIComponent(filename)}" 
+                               class="btn btn-danger" style="color: white; text-decoration: none;">删除</a>
+                        </div>
+                    `;
+                    convertedFilesList.appendChild(fileItem);
+                });
+            } else {
+                convertedFilesList.innerHTML += '<p>没有已转换的文件。</p>';
+            }
+        } else {
+            console.error("获取状态失败:", response.status);
+        }
+    } catch (error) {
+        console.error('获取状态失败:', error);
+    }
+}
+
+// 页面加载时获取一次
+fetchStatusAndFiles();
+
+// 每 5 秒轮询一次
+setInterval(fetchStatusAndFiles, 5000);
+</script>
 </body>
 </html>

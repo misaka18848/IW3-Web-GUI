@@ -1,2 +1,4 @@
 Flask==2.3.3
 Werkzeug==3.0.1
+msal
+requests

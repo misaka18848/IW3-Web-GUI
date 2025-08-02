@@ -17,7 +17,7 @@
 ```cmd
 pip install -r requirements.txt
 ```
-5.在项目文件夹里打开config.py,修改上传文件夹（UPLOAD_FOLDER）和转换文件夹（CONVERTED_FOLDER）到你需要的地方，修改最大存储空间（MAX_STORAGE_SIZE）和最大文件大小（MAX_CONTENT_LENGTH）  
+5.在项目文件夹里打开config.py,修改上传文件夹（UPLOAD_FOLDER）和转换文件夹（CONVERTED_FOLDER）到你需要的地方，修改最大存储空间（MAX_STORAGE_SIZE）和最大文件大小（MAX_CONTENT_LENGTH），如果有onedrive企业版的也可以填写相关设置接入OneDrive  
 6.在项目文件夹里打开app.py，修改底部的port=8000修改成你需要的端口  
 7.在项目文件夹里打开命令提示符，输入以下内容启动Web GUI
 ```cmd
