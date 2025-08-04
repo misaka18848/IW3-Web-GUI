@@ -12,15 +12,16 @@
     - iw3web/
     - iw3-cli.bat
 ```
-3.安装python  
-4.在项目文件夹里打开命令提示符，输入以下内容安装项目依赖
+3.安装python(测试过3.10 3.11可以运行本项目，3.13不兼容)  
+4.在iw3web文件夹里打开命令提示符，输入以下内容安装项目依赖
 ```cmd
 pip install -r requirements.txt
 ```
-5.在项目文件夹里打开config.py,修改上传文件夹（UPLOAD_FOLDER）和转换文件夹（CONVERTED_FOLDER）到你需要的地方，修改最大存储空间（MAX_STORAGE_SIZE）和最大文件大小（MAX_CONTENT_LENGTH），如果有onedrive企业版的也可以填写相关设置接入OneDrive  
-6.在项目文件夹里打开app.py，修改底部的port=8000修改成你需要的端口  
-7.在项目文件夹里打开命令提示符，输入以下内容启动Web GUI
+5.在iw3web文件夹里打开config.py,修改上传文件夹（UPLOAD_FOLDER）和转换文件夹（CONVERTED_FOLDER）到你需要的地方(不建议使用相对链接)，修改最大存储空间（MAX_STORAGE_SIZE）和最大文件大小（MAX_CONTENT_LENGTH），如果有onedrive企业版的也可以填写相关设置接入OneDrive  
+6.在iw3web文件夹里打开app.py，修改底部的port=8000修改成你需要的端口  
+7.在iw3web文件夹里打开命令提示符，输入以下内容启动Web GUI
 ```cmd
 python app.py
 ```
+
 然后你就可以访问localhost:上面设置的端口来使用IW3 Web GUI了
