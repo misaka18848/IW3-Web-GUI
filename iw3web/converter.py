@@ -17,7 +17,7 @@ def convert_file(input_path, output_path, additional_args=""):
         if not os.path.isfile(cli_script):
             return False, f"转换脚本不存在: {cli_script}"
 
-        cmd = [cli_script, '-i', input_path, '-o', output_path, "--yes"]
+        cmd = [cli_script, '-i', input_path, '-o', output_path, "--yes", "--video-codec", "libx265"]
         if additional_args:
             cmd.extend(additional_args.split())
 
@@ -39,6 +39,14 @@ def convert_file(input_path, output_path, additional_args=""):
         filename = os.path.basename(output_path)
         
         if Config.USE_ONEDRIVE_STORAGE and one_drive_client:
+            with storage_lock:
+                if os.path.isfile(input_path):
+                    try:
+                        os.remove(input_path)
+                        print(f"[删除源文件] {input_path}")
+                    except Exception as e:
+                        print(f"[警告] 删除源文件失败 {input_path}: {e}")
+
             # 上传到 OneDrive
             success, msg = one_drive_client.upload_file(output_path, filename)
             if not success:
