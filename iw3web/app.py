@@ -83,19 +83,17 @@ def cleanup_temp_files():
 
 def restore_processing_queue():
     """恢复处理队列"""
-    # 从持久化状态恢复
     state = load_persistent_state()
     if state and 'queue' in state:
         restored_count = 0
         for task_data in state['queue']:
             try:
-                # 验证文件是否存在
                 if os.path.exists(task_data['input_path']):
                     task = {
                         'input_path': task_data['input_path'],
                         'original_filename': task_data['original_filename'],
                         'stored_filename': task_data['stored_filename'],
-                        'additional_args': task_data.get('additional_args', '')  # ✅ 确保获取 additional_args，提供默认值
+                        'additional_args': task_data.get('additional_args', '')
                     }
                     conversion_queue.put(task)
                     restored_count += 1
@@ -105,30 +103,114 @@ def restore_processing_queue():
                 print(f"恢复任务失败: {e}")
         
         print(f"恢复了 {restored_count} 个待处理任务")
-    
-    # 同时检查上传文件夹中的文件
-    if os.path.exists(Config.UPLOAD_FOLDER):
-        for filename in os.listdir(Config.UPLOAD_FOLDER):
-            file_path = os.path.join(Config.UPLOAD_FOLDER, filename)
-            if os.path.isfile(file_path) and filename.endswith(('.mp4', '.avi', '.mkv')):
-                # 尝试从文件名解析原始文件名
-                original_filename = filename
-                # 这里可以根据您的命名规则调整
-                if '_' in filename and filename.startswith('upload_'):
-                    parts = filename.split('_')
-                    if len(parts) > 3:
-                        ext = parts[-1]
-                        original_filename = f"恢复文件_{int(time.time())}.{ext}"
-                
-                task = {
-                    'input_path': file_path,
-                    'original_filename': original_filename,
-                    'stored_filename': filename,
-                    'additional_args': ''  # ✅ 新发现的文件没有额外参数，设为空字符串
-                }
-                conversion_queue.put(task)
-                print(f"发现并添加未处理的上传文件: {filename}")
+        # ✅ 恢复后不需要再扫描文件夹
+    else:
+        print("无持久化队列数据，跳过恢复")
+def restore_converted_files_to_onedrive():
+    """
+    启动时检查本地 converted 文件夹中是否有未上传到 OneDrive 的文件，
+    并尝试上传（无限重试），上传成功后删除本地文件，加入 converted_files 列表。
+    """
+    if not Config.USE_ONEDRIVE_STORAGE or not one_drive_client:
+        print("OneDrive 未启用，跳过上传恢复")
+        return
 
+    print("正在检查本地已转换但未上传的文件...")
+
+    # 获取 OneDrive 上已存在的文件名（避免重复上传）
+    try:
+        remote_file_items = one_drive_client.list_files_in_folder(Config.ONEDRIVE_FOLDER_PATH)
+        remote_files = [item['name'] for item in remote_file_items]
+        print(f"OneDrive 上已有文件: {remote_files}")
+    except Exception as e:
+        print(f"获取 OneDrive 文件列表失败，将尝试上传所有本地文件: {e}")
+        remote_files = []
+
+    uploaded_count = 0
+
+    if os.path.exists(Config.CONVERTED_FOLDER):
+        for filename in os.listdir(Config.CONVERTED_FOLDER):
+            file_path = os.path.join(Config.CONVERTED_FOLDER, filename)
+
+            if not os.path.isfile(file_path) or not allowed_file(filename):
+                continue
+
+            # 如果该文件已存在于 OneDrive，跳过
+            if filename in remote_files:
+                print(f"文件已存在于 OneDrive，跳过: {filename}")
+                continue
+
+            print(f"发现未上传文件，准备上传到 OneDrive: {filename}")
+
+            # ✅ 无限重试上传
+            attempt = 1
+            while True:
+                try:
+                    success, message = one_drive_client.upload_file(file_path, filename)
+                    if success:
+                        print(f"✅ 上传成功 [{attempt}次尝试]: {filename} - {message}")
+                        # 上传成功，删除本地文件
+                        os.remove(file_path)
+                        print(f"🗑️ 已删除本地文件: {file_path}")
+
+                        # 加入 converted_files（去重）
+                        with status_lock:
+                            if filename not in status_info['converted_files']:
+                                status_info['converted_files'].insert(0, filename)
+
+                        # ✅ 同步持久化状态
+                        state = load_persistent_state() or {}
+                        if 'converted_files' not in state:
+                            state['converted_files'] = []
+                        if filename not in state['converted_files']:
+                            state['converted_files'].insert(0, filename)
+                        save_persistent_state(state)
+
+                        uploaded_count += 1
+                        break  # 成功则跳出无限循环
+
+                    else:
+                        print(f"❌ 上传失败 [{attempt}次尝试]: {filename} - {message}")
+
+                except Exception as e:
+                    print(f"❌ 上传异常 [{attempt}次尝试]: {filename}, 错误: {str(e)}")
+
+                # ✅ 指数退避：最多等待 10 分钟（600 秒）
+                wait_time = 2 ** attempt
+                max_wait = 600  # 10 分钟
+                wait_time = min(wait_time, max_wait)
+
+                print(f"等待 {wait_time} 秒后重试... (按 Ctrl+C 可中断)")
+                try:
+                    time.sleep(wait_time)
+                except KeyboardInterrupt:
+                    print(f"\n⚠️ 用户中断上传尝试: {filename}")
+                    break  # 允许用户手动中断
+
+                attempt += 1
+
+    print(f"恢复上传完成，成功上传 {uploaded_count} 个文件到 OneDrive")
+def save_queue_state():
+    """只保存队列中的任务到持久化状态"""
+    try:
+        # 提取队列中的所有任务
+        temp_queue = queue.Queue()
+        tasks = []
+        while not conversion_queue.empty():
+            task = conversion_queue.get()
+            tasks.append(task)
+            temp_queue.put(task)
+        
+        # 恢复原队列
+        while not temp_queue.empty():
+            conversion_queue.put(temp_queue.get())
+        
+        # 读取旧状态，只更新 queue
+        state = load_persistent_state() or {}
+        state['queue'] = tasks
+        save_persistent_state(state)
+    except Exception as e:
+        print(f"保存队列状态失败: {e}")
 def conversion_worker():
     """后台转换工作线程"""
     print(" conversion_worker 线程已启动，等待任务...")
@@ -180,13 +262,14 @@ def conversion_worker():
         print(f" 任务完成: {original_filename}, 成功: {success}")
 
         # 保存状态
-        save_persistent_state({
-            'queue': [],
-            'processing': status_info['processing'],
-            'current_file': status_info['current_file'],
-            'uploaded_files': status_info['uploaded_files'].copy(),
-            'converted_files': status_info['converted_files'].copy()
-        })
+        # ✅ 只更新 processing 状态，不修改 queue
+        state = load_persistent_state() or {}
+        state['processing'] = status_info['processing']
+        state['current_file'] = status_info['current_file']
+        state['current_status'] = status_info['current_status']
+        state['uploaded_files'] = status_info['uploaded_files'].copy()
+        state['converted_files'] = status_info['converted_files'].copy()
+        save_persistent_state(state)
 @app.route('/upload_direct', methods=['POST'])
 def upload_direct():
     data = request.get_json()
@@ -231,6 +314,7 @@ def upload_direct():
             }
             conversion_queue.put(task)
             print(f"[直链上传] 已加入队列: {filename}")
+            save_queue_state()
 
         except Exception as e:
             print(f"[直链上传] 下载失败 {url}: {str(e)}")
@@ -322,7 +406,7 @@ def upload_chunk():
             'additional_args': additional_args
         }
         conversion_queue.put(task)
-
+        save_queue_state()
         # 更新状态 (使用锁)
         with status_lock:
             if original_filename not in status_info['uploaded_files']:
@@ -387,13 +471,14 @@ def index():
 @app.route('/delete/uploaded/<path:filename>')
 def delete_uploaded(filename):
     task_to_remove = None
-    with status_lock:  # 确保线程安全
+    with status_lock:
         for task in list(conversion_queue.queue):
             if task['original_filename'] == filename:
                 task_to_remove = task
                 break
     
     if task_to_remove:
+        # 从队列移除
         temp_queue = queue.Queue()
         while not conversion_queue.empty():
             item = conversion_queue.get()
@@ -402,8 +487,12 @@ def delete_uploaded(filename):
         while not temp_queue.empty():
             conversion_queue.put(temp_queue.get())
         
+        # 删除文件
         if os.path.exists(task_to_remove['input_path']):
             os.remove(task_to_remove['input_path'])
+        
+        # ✅ 保存队列状态
+        save_queue_state()
     
     with status_lock:
         if filename in status_info['uploaded_files']:
@@ -461,7 +550,8 @@ if __name__ == '__main__':
     # 恢复处理队列
     print("正在恢复处理队列...")
     restore_processing_queue()
-    
+    print("正在恢复已转换但未上传的文件到 OneDrive...")
+    restore_converted_files_to_onedrive()  # 新增：上传本地已转换文件
     # 启动后台转换线程
     worker_thread = threading.Thread(target=conversion_worker, daemon=True)
     worker_thread.start()

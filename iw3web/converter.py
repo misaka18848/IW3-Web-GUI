@@ -3,6 +3,7 @@ import os
 import threading
 from config import Config
 import time # 用于时间戳
+import random
 from onedrive_client import one_drive_client # 导入新客户端
 
 # 创建线程锁，保护共享资源（文件系统 + 存储管理）
@@ -17,7 +18,7 @@ def convert_file(input_path, output_path, additional_args=""):
         if not os.path.isfile(cli_script):
             return False, f"转换脚本不存在: {cli_script}"
 
-        cmd = [cli_script, '-i', input_path, '-o', output_path, "--yes", "--video-codec", "libx265"]
+        cmd = [cli_script, '-i', input_path, '-o', output_path, "--yes", "--video-codec", "hevc_nvenc"]
         if additional_args:
             cmd.extend(additional_args.split())
 
@@ -47,12 +48,38 @@ def convert_file(input_path, output_path, additional_args=""):
                     except Exception as e:
                         print(f"[警告] 删除源文件失败 {input_path}: {e}")
 
-            # 上传到 OneDrive
-            success, msg = one_drive_client.upload_file(output_path, filename)
-            if not success:
-                # 如果上传失败，可以选择保留本地文件或删除
-                # 这里选择保留，但标记为失败
-                return False, f"转换成功但上传OneDrive失败: {msg}"
+            # === 上传到 OneDrive（无限重试） ===
+            base_delay = 2   # 初始延迟2秒
+            max_wait = 600  # 最大等待时间：10分钟（避免等待太久）
+
+            attempt = 1
+            while True:
+                print(f"[上传] 尝试 {attempt}: {filename}")
+                try:
+                    success, msg = one_drive_client.upload_file(output_path, filename)
+                    if success:
+                        print(f"[上传成功] {filename}")
+                        break  # ✅ 成功则退出循环
+                    else:
+                        print(f"[上传失败] 第{attempt}次尝试失败: {msg}")
+                except Exception as e:
+                    print(f"[上传异常] 第{attempt}次尝试发生异常: {str(e)}")
+
+                # 计算等待时间：指数退避 + 随机抖动
+                wait_time = base_delay * (2 ** (attempt - 1))
+                wait_time = wait_time + random.uniform(0, 1)  # 加上 0~1 秒抖动
+                wait_time = min(wait_time, max_wait)         # 限制最大等待时间
+
+                print(f"等待 {wait_time:.2f} 秒后重试... (按 Ctrl+C 可中断)")
+                try:
+                    time.sleep(wait_time)
+                except KeyboardInterrupt:
+                    print(f"\n\n⚠️ 用户手动中断上传流程: {filename}")
+                    # 可根据需要决定是否返回失败、保留文件等
+                    error_msg = "用户中断上传"
+                    return False, error_msg
+
+                attempt += 1  # 尝试次数递增
 
             # 上传成功后，删除本地转换后的文件
             with storage_lock:
@@ -63,7 +90,6 @@ def convert_file(input_path, output_path, additional_args=""):
                     except Exception as e:
                         print(f"[警告] 删除本地转换文件失败 {output_path}: {e}")
 
-            # 无需调用 manage_storage()，由下面的逻辑统一处理
         else:
             # 本地存储模式，保留原有逻辑
             with storage_lock:
