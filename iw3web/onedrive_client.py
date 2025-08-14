@@ -319,14 +319,14 @@ class OneDriveClient:
         else:
             print(f"[OneDrive] 创建共享链接失败: {response.status_code}, {response.text}")
             return None
-
     def list_files_in_folder(self, folder_path=Config.ONEDRIVE_FOLDER_PATH):
         """列出指定文件夹中的所有文件及其大小和修改时间"""
         folder_id = self.get_folder_id_by_path(folder_path)
         if not folder_id:
             return []
 
-        url = f"{Config.GRAPH_API_BASE_URL}/users/{Config.ONEDRIVE_USER_ID}/drive/items/{folder_id}/children?$select=name,size,lastModifiedDateTime"
+        # ✅ 修复：加上 'file' 字段！
+        url = f"{Config.GRAPH_API_BASE_URL}/users/{Config.ONEDRIVE_USER_ID}/drive/items/{folder_id}/children?$select=name,size,lastModifiedDateTime,file"
         files = []
         while url:
             response = self._make_request("GET", url)
@@ -336,15 +336,13 @@ class OneDriveClient:
 
             data = response.json()
             for item in data.get('value', []):
-                if item.get('file'):  # 确保是文件，不是文件夹
+                if item.get('file'):  # 现在能正确识别文件了
                     files.append({
                         'name': item['name'],
                         'size': item['size'],
-                        'lastModifiedDateTime': item['lastModifiedDateTime'] # ISO 8601 格式
+                        'lastModifiedDateTime': item['lastModifiedDateTime']
                     })
-            # 处理分页
-            url = data.get('@odata.nextLink') # 如果有更多页面
-
+            url = data.get('@odata.nextLink')
         return files
 
 # 全局实例 (确保在 app.py 中初始化)

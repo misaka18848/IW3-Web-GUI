@@ -18,7 +18,7 @@ def convert_file(input_path, output_path, additional_args=""):
         if not os.path.isfile(cli_script):
             return False, f"转换脚本不存在: {cli_script}"
 
-        cmd = [cli_script, '-i', input_path, '-o', output_path, "--yes", "--video-codec", "hevc_nvenc"]
+        cmd = [cli_script, '-i', input_path, '-o', output_path, "--yes", "--video-codec", "libx265"]
         if additional_args:
             cmd.extend(additional_args.split())
 

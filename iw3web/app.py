@@ -82,7 +82,7 @@ def cleanup_temp_files():
                     print(f"删除临时文件失败 {filename}: {e}")
 
 def restore_processing_queue():
-    """恢复处理队列"""
+    """恢复处理队列 AND uploaded_files"""
     state = load_persistent_state()
     if state and 'queue' in state:
         restored_count = 0
@@ -103,7 +103,12 @@ def restore_processing_queue():
                 print(f"恢复任务失败: {e}")
         
         print(f"恢复了 {restored_count} 个待处理任务")
-        # ✅ 恢复后不需要再扫描文件夹
+
+        # ✅ 新增：恢复 uploaded_files
+        if 'uploaded_files' in state:
+            with status_lock:
+                status_info['uploaded_files'] = state['uploaded_files'].copy()
+            print(f"恢复了 {len(state['uploaded_files'])} 个已上传文件列表")
     else:
         print("无持久化队列数据，跳过恢复")
 def restore_converted_files_to_onedrive():
@@ -190,6 +195,64 @@ def restore_converted_files_to_onedrive():
                 attempt += 1
 
     print(f"恢复上传完成，成功上传 {uploaded_count} 个文件到 OneDrive")
+
+
+def initialize_converted_files():
+    """根据配置初始化 converted_files 列表"""
+    global status_info
+
+    print("正在初始化已转换文件列表...")
+
+    if Config.USE_ONEDRIVE_STORAGE and one_drive_client:
+        # ✅ 从 OneDrive 获取文件列表
+        try:
+            file_items = one_drive_client.list_files_in_folder(Config.ONEDRIVE_FOLDER_PATH)
+            # 按 lastModifiedDateTime 降序排序（最新的在前）
+            sorted_items = sorted(
+                file_items,
+                key=lambda x: x['lastModifiedDateTime'],
+                reverse=True
+            )
+            remote_files = [item['name'] for item in sorted_items]
+            print(f"[OneDrive] 加载远程已转换文件 ({len(remote_files)} 个): {remote_files}")
+
+            # 更新内存状态
+            with status_lock:
+                status_info['converted_files'] = remote_files
+
+            # ✅ 同时更新持久化状态（如 JSON 文件）
+            state = load_persistent_state() or {}
+            state['converted_files'] = remote_files
+            save_persistent_state(state)
+
+        except Exception as e:
+            print(f"[OneDrive] 初始化 converted_files 时获取文件列表失败，将使用空列表: {e}")
+            with status_lock:
+                status_info['converted_files'] = []
+
+    else:
+        # ❌ OneDrive 未启用，从本地 converted/ 文件夹读取
+        local_files = []
+        if os.path.exists(Config.CONVERTED_FOLDER):
+            for filename in os.listdir(Config.CONVERTED_FOLDER):
+                file_path = os.path.join(Config.CONVERTED_FOLDER, filename)
+                if os.path.isfile(file_path) and allowed_file(filename):
+                    local_files.append(filename)
+
+            # 按修改时间倒序排列
+            local_files.sort(
+                key=lambda x: os.path.getmtime(os.path.join(Config.CONVERTED_FOLDER, x)),
+                reverse=True
+            )
+            print(f"[本地] 加载已转换文件 ({len(local_files)} 个): {local_files}")
+
+            with status_lock:
+                status_info['converted_files'] = local_files
+
+            # 更新持久化状态
+            state = load_persistent_state() or {}
+            state['converted_files'] = local_files
+            save_persistent_state(state)
 def save_queue_state():
     """只保存队列中的任务到持久化状态"""
     try:
@@ -551,10 +614,12 @@ if __name__ == '__main__':
     print("正在恢复处理队列...")
     restore_processing_queue()
     print("正在恢复已转换但未上传的文件到 OneDrive...")
-    restore_converted_files_to_onedrive()  # 新增：上传本地已转换文件
+    upload_restore_thread = threading.Thread(target=restore_converted_files_to_onedrive, daemon=True)
+    upload_restore_thread.start()  # 新增：上传本地已转换文件
+    initialize_converted_files()
     # 启动后台转换线程
     worker_thread = threading.Thread(target=conversion_worker, daemon=True)
     worker_thread.start()
     
 
-    app.run(host='0.0.0.0',debug=True, threaded=True,port=8000)
+    app.run(host='0.0.0.0',debug=True, threaded=True,port=8000,use_reloader=False)
