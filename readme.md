@@ -12,15 +12,16 @@
     - iw3web/
     - iw3-cli.bat
 ```
-3.安装python  
-4.在项目文件夹里打开命令提示符，输入以下内容安装项目依赖
+3.安装python3.10  
+4.在这里下载[PsTool](https://download.sysinternals.com/files/PSTools.zip)并解压,把里面的pssuspend64.exe改名pssuspend.exe放进项目文件夹（iw3web）  
+5.在项目文件夹里打开命令提示符，输入以下内容安装项目依赖
 ```cmd
 pip install -r requirements.txt
 ```
-5.在项目文件夹里打开config.py,修改上传文件夹（UPLOAD_FOLDER）和转换文件夹（CONVERTED_FOLDER）到你需要的地方，修改最大存储空间（MAX_STORAGE_SIZE）和最大文件大小（MAX_CONTENT_LENGTH），如果有onedrive企业版的也可以填写相关设置接入OneDrive  
-6.在项目文件夹里打开app.py，修改底部的port=8000修改成你需要的端口  
-7.在项目文件夹里打开命令提示符，输入以下内容启动Web GUI
+6.在项目文件夹里打开config.py,修改上传文件夹（UPLOAD_FOLDER）和转换文件夹（CONVERTED_FOLDER）到你需要的地方，修改最大存储空间（MAX_STORAGE_SIZE）和最大文件大小（MAX_CONTENT_LENGTH），修改STOP_TIME_START和STOP_TIME_END可以让这段时间不新开始任务，如果有onedrive企业版的也可以填写相关设置接入OneDrive  
+7.在项目文件夹里打开main.py，修改底部的port=8000修改成你需要的端口  
+8.在项目文件夹里打开管理员级别的命令提示符，输入以下内容启动Web GUI（你也可以直接点start.bat启动）
 ```cmd
-python app.py
+python main.py
 ```
 然后你就可以访问localhost:上面设置的端口来使用IW3 Web GUI了

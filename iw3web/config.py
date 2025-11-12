@@ -1,5 +1,5 @@
 import os
-
+from datetime import datetime, time as dt_time, timedelta
 # 基本配置
 class Config:
     #上传文件存储目录
@@ -27,6 +27,10 @@ class Config:
 
     # Token 存储路径 (用于持久化刷新Token)
     TOKEN_PATH = os.path.join(os.path.dirname(__file__), 'onedrive_token.json')
+    # 修改这里可以让这段时间不新开始任务（已经开始的任务仍会正常进行）
+    STOP_TIME_START = dt_time(23, 0)   # 23:00
+    STOP_TIME_END = dt_time(3, 0)      # 03:00 (次日)
+    MIN_SLEEP = 10 # 最小 sleep 时间（秒），防止误差
 
 # 确保目录存在
 os.makedirs(Config.UPLOAD_FOLDER, exist_ok=True)

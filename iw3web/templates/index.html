@@ -235,6 +235,108 @@
         
     <!-- 上传区域 -->
     <div class="upload-section">
+        <!-- 高级参数面板 -->
+<div class="form-group">
+    <button type="button" id="toggleAdvancedParams" style="background: #6c757d; color: white; padding: 8px 12px; font-size: 14px; border: none; border-radius: 4px;">
+        ⚙️ 显示高级参数设置
+    </button>
+</div>
+
+<div id="advancedParamsPanel" style="display: none; margin-top: 15px; padding: 15px; background: #f1f3f5; border-radius: 8px; border: 1px solid #ddd;">
+    <!-- 开关类 -->
+    <div class="form-group">
+        <label><input type="checkbox" id="lowVram"> 启用低显存模式 (--low-vram)</label>
+    </div>
+    <div class="form-group">
+        <label><input type="checkbox" id="sceneDetect"> 启用场景检测 (--scene-detect)</label>
+    </div>
+    <div class="form-group">
+        <label><input type="checkbox" id="disableAmp"> 老显卡兼容 (--disable-amp)</label>
+    </div>
+    <div class="form-group">
+        <label><input type="checkbox" id="vr180"> 输出 VR180° 视频 (--vr180)</label>
+    </div>
+
+    <!-- 滑块类 -->
+    <div class="form-group">
+        <label>立体效果强度: <span id="divergenceValue">2.0</span></label>
+        <input type="range" id="divergence" min="0" max="2" step="0.1" value="2.0" style="width: 100%;">
+    </div>
+    <div class="form-group">
+        <label>汇聚点位置: <span id="convergenceValue">0.5</span></label>
+        <input type="range" id="convergence" min="0" max="1" step="0.1" value="0.5" style="width: 100%;">
+    </div>
+
+    <!-- 下拉框：模型 -->
+    <div class="form-group">
+        <label for="depthModel">深度模型:</label>
+        <select id="depthModel" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+            <!-- 按你给的列表填充 -->
+            <option value="ZoeD_N">ZoeD_N</option>
+            <option value="ZoeD_K">ZoeD_K</option>
+            <option value="ZoeD_NK">ZoeD_NK</option>
+            <option value="ZoeD_Any_N" selected>ZoeD_Any_N</option>
+            <option value="ZoeD_Any_K">ZoeD_Any_K</option>
+            <option value="Any_S">Any_S</option>
+            <option value="Any_B">Any_B</option>
+            <option value="Any_L">Any_L</option>
+            <option value="Any_V2_S">Any_V2_S</option>
+            <option value="Any_V2_B">Any_V2_B</option>
+            <option value="Any_V2_L">Any_V2_L</option>
+            <option value="Any_V2_N_S">Any_V2_N_S</option>
+            <option value="Any_V2_N_B">Any_V2_N_B</option>
+            <option value="Any_V2_N_L">Any_V2_N_L</option>
+            <option value="Any_V2_K_S">Any_V2_K_S</option>
+            <option value="Any_V2_K_B">Any_V2_K_B</option>
+            <option value="Any_V2_K_L">Any_V2_K_L</option>
+            <option value="Distill_Any_S">Distill_Any_S</option>
+            <option value="Distill_Any_B">Distill_Any_B</option>
+            <option value="Distill_Any_L">Distill_Any_L</option>
+            <option value="VDA_S">VDA_S</option>
+            <option value="VDA_B">VDA_B</option>
+            <option value="VDA_L">VDA_L</option>
+            <option value="VDA_Metric_S">VDA_Metric_S</option>
+            <option value="VDA_Metric_B">VDA_Metric_B</option>
+            <option value="VDA_Metric_L">VDA_Metric_L</option>
+            <option value="VDA_Stream_S">VDA_Stream_S</option>
+            <option value="VDA_Stream_B">VDA_Stream_B</option>
+            <option value="VDA_Stream_L">VDA_Stream_L</option>
+        </select>
+    </div>
+
+    <!-- 下拉框：编码器 -->
+    <div class="form-group">
+        <label for="videoCodec">视频编码器:</label>
+        <select id="videoCodec" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+            <option value="libx264">libx264 (H.264 CPU)</option>
+            <option value="h265" selected>H.265 (软件)</option>
+            <option value="h264_nvenc">h264_nvenc (NVIDIA H.264)</option>
+            <option value="hevc_nvenc">hevc_nvenc (NVIDIA H.265)</option>
+        </select>
+    </div>
+
+    <!-- 预设管理 -->
+    <hr style="margin: 15px 0;">
+    <div class="form-group">
+        <label>参数预设:</label>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <select id="presetSelect" style="flex: 1; min-width: 150px; padding: 6px;">
+                <option value="">-- 选择预设 --</option>
+            </select>
+            <input type="text" id="presetNameInput" placeholder="预设名称" style="flex: 1; min-width: 120px; padding: 6px;">
+            <button type="button" id="savePresetBtn" style="padding: 6px 10px; background: #28a745; color: white; border: none; border-radius: 4px;">保存</button>
+            <button type="button" id="deletePresetBtn" style="padding: 6px 10px; background: #dc3545; color: white; border: none; border-radius: 4px;">删除</button>
+        </div>
+    </div>
+</div>
+
+<!-- 原有的“额外参数”输入框保留（作为手动补充） -->
+<div class="form-group">
+    <label for="additional_args">IW3额外参数（可选，手动补充）</label>
+    <input type="text" name="additional_args" id="additional_args" 
+        placeholder="例如: --custom-flag value" 
+        value="{{ additional_args }}">
+</div>
         <div class="form-group">
             <label for="uploadMethod">上传方式</label>
             <select id="uploadMethod" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
@@ -263,12 +365,12 @@
             </div>
         </div>
         
-        <div class="form-group">
+        <!-- <div class="form-group">
             <label for="additional_args">IW3额外参数（可选）</label>
             <input type="text" name="additional_args" id="additional_args" 
                 placeholder="例如: --depth-model Any_V2_S" 
                 value="{{ additional_args }}">
-        </div>
+        </div> -->
         
         <button type="button" id="uploadBtn">上传并转换</button>
 
@@ -284,6 +386,14 @@
             <h3>处理状态</h3>
             <p><strong>当前状态:</strong> <span id="currentStatus">{{ status_info.current_status }}</span></p>
             <p><strong>当前文件:</strong> <span id="currentFile">{{ status_info.current_file or '无' }}</span></p>
+            <div style="margin: 10px 0;">
+                <button id="pauseBtn" class="btn-secondary" style="background: #ffc107; color: #212529; padding: 8px 16px; font-size: 14px;">
+                    ⏸️ 暂停
+                </button>
+                <button id="resumeBtn" class="btn-success" style="background: #28a745; padding: 8px 16px; font-size: 14px; display: none;">
+                    ▶️ 继续
+                </button>
+            </div>
         </div>
         
         <!-- 已上传文件列表 -->
@@ -350,6 +460,8 @@ const currentStatusSpan = document.getElementById('currentStatus');
 const currentFileSpan = document.getElementById('currentFile');
 const uploadedFilesList = document.getElementById('uploadedFilesList');
 const convertedFilesList = document.getElementById('convertedFilesList');
+const pauseBtn = document.getElementById('pauseBtn');
+const resumeBtn = document.getElementById('resumeBtn');
 
 // 上传方式选择
 const uploadMethodSelect = document.getElementById('uploadMethod');
@@ -376,6 +488,57 @@ uploadMethodSelect.addEventListener('change', function () {
         document.getElementById('directUrl').required = true;
     }
 });
+
+// 暂停
+pauseBtn.addEventListener('click', async () => {
+    try {
+        const response = await fetch('/api/pause', { method: 'POST' });
+        const data = await response.json();
+        if (response.ok) {
+            alert(data.message);
+            pauseBtn.disabled = true;
+            resumeBtn.style.display = 'inline-block';
+            currentStatusSpan.textContent = '已暂停';
+        } else {
+            alert(`错误: ${data.error}`);
+        }
+    } catch (error) {
+        alert(`请求失败: ${error.message}`);
+    }
+});
+
+// 继续
+resumeBtn.addEventListener('click', async () => {
+    try {
+        const response = await fetch('/api/resume', { method: 'POST' });
+        const data = await response.json();
+        if (response.ok) {
+            alert(data.message);
+            resumeBtn.style.display = 'none';
+            pauseBtn.disabled = false;
+            currentStatusSpan.textContent = '正在转换';
+        } else {
+            alert(`错误: ${data.error}`);
+        }
+    } catch (error) {
+        alert(`请求失败: ${error.message}`);
+    }
+});
+
+// ✅ 根据状态自动控制按钮显示
+function updatePauseResumeButtons(currentStatus) {
+    if (currentStatus === '正在转换') {
+        pauseBtn.style.display = 'inline-block';
+        pauseBtn.disabled = false;
+        resumeBtn.style.display = 'none';
+    } else if (currentStatus === '已暂停') {
+        pauseBtn.style.display = 'none';
+        resumeBtn.style.display = 'inline-block';
+    } else {
+        pauseBtn.style.display = 'none';
+        resumeBtn.style.display = 'none';
+    }
+}
 
 // 上传主函数
 async function uploadFile() {
@@ -424,7 +587,7 @@ async function uploadFile() {
                 formData.append('filename', file.name);
                 formData.append('chunk_index', i);
                 formData.append('total_chunks', totalChunks);
-                formData.append('additional_args', additionalArgsInput.value);
+                formData.append('additional_args', buildAdditionalArgs());
 
                 if (sessionId) {
                     formData.append('session_id', sessionId);
@@ -508,7 +671,7 @@ async function uploadFile() {
                 body: JSON.stringify({
                     url: directUrl,
                     filename: filename,
-                    additional_args: additionalArgsInput.value
+                    additional_args: buildAdditionalArgs()
                 })
             });
 
@@ -558,6 +721,7 @@ async function fetchStatusAndFiles() {
             const data = await response.json();
 
             currentStatusSpan.textContent = data.current_status || '空闲';
+            updatePauseResumeButtons(data.current_status);
             currentFileSpan.textContent = data.current_file || '无';
 
             // 渲染待转换文件
@@ -612,6 +776,151 @@ fetchStatusAndFiles();
 
 // 每 5 秒轮询一次
 setInterval(fetchStatusAndFiles, 5000);
+// ========== 高级参数控制 ==========
+const toggleBtn = document.getElementById('toggleAdvancedParams');
+const panel = document.getElementById('advancedParamsPanel');
+
+toggleBtn.addEventListener('click', () => {
+    const isHidden = panel.style.display === 'none';
+    panel.style.display = isHidden ? 'block' : 'none';
+    toggleBtn.textContent = isHidden ? '⚙️ 隐藏高级参数设置' : '⚙️ 显示高级参数设置';
+});
+
+// 滑块值显示
+document.getElementById('divergence').addEventListener('input', (e) => {
+    document.getElementById('divergenceValue').textContent = e.target.value;
+});
+document.getElementById('convergence').addEventListener('input', (e) => {
+    document.getElementById('convergenceValue').textContent = e.target.value;
+});
+
+// 生成参数字符串
+function buildAdditionalArgs() {
+    const args = [];
+
+    if (document.getElementById('lowVram').checked) args.push('--low-vram');
+    if (document.getElementById('sceneDetect').checked) args.push('--scene-detect');
+    if (document.getElementById('disableAmp').checked) args.push('--disable-amp');
+    if (document.getElementById('vr180').checked) args.push('--vr180');
+
+    const divergence = parseFloat(document.getElementById('divergence').value);
+    if (divergence !== 2.0) args.push(`--divergence ${divergence.toFixed(1)}`);
+
+    const convergence = parseFloat(document.getElementById('convergence').value);
+    if (convergence !== 0.5) args.push(`--convergence ${convergence.toFixed(1)}`);
+
+    const depthModel = document.getElementById('depthModel').value;
+    if (depthModel !== 'ZoeD_Any_N') args.push(`--depth-model ${depthModel}`);
+
+    const videoCodec = document.getElementById('videoCodec').value;
+    if (videoCodec !== 'h265') args.push(`--video-codec ${videoCodec}`);
+
+    // 手动输入部分（追加）
+    const manualArgs = document.getElementById('additional_args').value.trim();
+    if (manualArgs) args.push(manualArgs);
+
+    return args.join(' ').trim();
+}
+
+// 更新参数显示（可选：实时预览）
+// 可以加一个只读预览框，但这里我们直接在上传时调用 buildAdditionalArgs()
+
+// ========== 预设管理 ==========
+const PRESET_KEY = 'iw3_presets';
+let presets = JSON.parse(localStorage.getItem(PRESET_KEY) || '{}');
+
+function savePreset(name) {
+    if (!name) {
+        // 自动生成未命名
+        let i = 1;
+        while (presets[`未命名预设-${i}`]) i++;
+        name = `未命名预设-${i}`;
+    }
+    const preset = {
+        lowVram: document.getElementById('lowVram').checked,
+        sceneDetect: document.getElementById('sceneDetect').checked,
+        disableAmp: document.getElementById('disableAmp').checked,
+        vr180: document.getElementById('vr180').checked,
+        divergence: document.getElementById('divergence').value,
+        convergence: document.getElementById('convergence').value,
+        depthModel: document.getElementById('depthModel').value,
+        videoCodec: document.getElementById('videoCodec').value,
+        manualArgs: document.getElementById('additional_args').value
+    };
+    presets[name] = preset;
+    localStorage.setItem(PRESET_KEY, JSON.stringify(presets));
+    loadPresetsToSelect();
+    alert(`✅ 预设 "${name}" 已保存`);
+}
+
+function loadPreset(name) {
+    const p = presets[name];
+    if (!p) return;
+    document.getElementById('lowVram').checked = p.lowVram || false;
+    document.getElementById('sceneDetect').checked = p.sceneDetect || false;
+    document.getElementById('disableAmp').checked = p.disableAmp || false;
+    document.getElementById('vr180').checked = p.vr180 || false;
+    document.getElementById('divergence').value = p.divergence || '2.0';
+    document.getElementById('convergence').value = p.convergence || '0.5';
+    document.getElementById('depthModel').value = p.depthModel || 'ZoeD_Any_N';
+    document.getElementById('videoCodec').value = p.videoCodec || 'h265';
+    document.getElementById('additional_args').value = p.manualArgs || '';
+    document.getElementById('divergenceValue').textContent = p.divergence || '2.0';
+    document.getElementById('convergenceValue').textContent = p.convergence || '0.5';
+}
+
+function deletePreset(name) {
+    if (confirm(`确定删除预设 "${name}"？`)) {
+        delete presets[name];
+        localStorage.setItem(PRESET_KEY, JSON.stringify(presets));
+        loadPresetsToSelect();
+    }
+}
+
+function loadPresetsToSelect() {
+    const select = document.getElementById('presetSelect');
+    select.innerHTML = '<option value="">-- 选择预设 --</option>';
+    Object.keys(presets).forEach(name => {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        select.appendChild(opt);
+    });
+}
+
+// 绑定预设按钮
+document.getElementById('savePresetBtn').addEventListener('click', () => {
+    const name = document.getElementById('presetNameInput').value.trim();
+    savePreset(name);
+});
+
+document.getElementById('deletePresetBtn').addEventListener('click', () => {
+    const name = document.getElementById('presetSelect').value;
+    if (name) deletePreset(name);
+    else alert('请先选择一个预设');
+});
+
+document.getElementById('presetSelect').addEventListener('change', (e) => {
+    const name = e.target.value;
+    if (name) loadPreset(name);
+});
+
+// 初始化预设下拉框
+loadPresetsToSelect();
+
+// ========== 修改 uploadFile 函数 ==========
+// 在 uploadFile() 中，替换原来的 additionalArgsInput.value 为：
+// const finalArgs = buildAdditionalArgs();
+
+// 找到 uploadFile 函数中的这行：
+// formData.append('additional_args', additionalArgsInput.value);
+// 改为：
+// formData.append('additional_args', buildAdditionalArgs());
+
+// 同样，在直链上传部分：
+// body: JSON.stringify({ ..., additional_args: additionalArgsInput.value })
+// 改为：
+// body: JSON.stringify({ ..., additional_args: buildAdditionalArgs() })
 </script>
 </body>
 </html>
