@@ -308,10 +308,11 @@
     <div class="form-group">
         <label for="videoCodec">视频编码器:</label>
         <select id="videoCodec" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
-            <option value="libx264">libx264 (H.264 CPU)</option>
-            <option value="h265" selected>H.265 (软件)</option>
-            <option value="h264_nvenc">h264_nvenc (NVIDIA H.264)</option>
-            <option value="hevc_nvenc">hevc_nvenc (NVIDIA H.265)</option>
+            <option value="none" selected>默认</option>
+            <option value="libx264">H264</option>
+            <option value="libx265">H265</option>
+            <option value="h264_nvenc">h264_nvenc (NVIDIA H264)</option>
+            <option value="hevc_nvenc">hevc_nvenc (NVIDIA H265)</option>
         </select>
     </div>
 
@@ -334,7 +335,7 @@
 <div class="form-group">
     <label for="additional_args">IW3额外参数（可选，手动补充）</label>
     <input type="text" name="additional_args" id="additional_args" 
-        placeholder="例如: --custom-flag value" 
+        placeholder="例如: --preset veryslow" 
         value="{{ additional_args }}">
 </div>
         <div class="form-group">
@@ -392,6 +393,9 @@
                 </button>
                 <button id="resumeBtn" class="btn-success" style="background: #28a745; padding: 8px 16px; font-size: 14px; display: none;">
                     ▶️ 继续
+                </button>
+                    <button id="terminateBtn" class="btn-danger" style="background: #dc3545; padding: 8px 16px; font-size: 14px; display: none;">
+                    🛑 终止
                 </button>
             </div>
         </div>
@@ -462,6 +466,7 @@ const uploadedFilesList = document.getElementById('uploadedFilesList');
 const convertedFilesList = document.getElementById('convertedFilesList');
 const pauseBtn = document.getElementById('pauseBtn');
 const resumeBtn = document.getElementById('resumeBtn');
+const terminateBtn = document.getElementById('terminateBtn');
 
 // 上传方式选择
 const uploadMethodSelect = document.getElementById('uploadMethod');
@@ -524,20 +529,42 @@ resumeBtn.addEventListener('click', async () => {
         alert(`请求失败: ${error.message}`);
     }
 });
+// 终止任务
+terminateBtn.addEventListener('click', async () => {
+    if (!confirm('确定要终止当前转换任务吗？此操作不可恢复！')) return;
 
+    try {
+        const response = await fetch('/api/terminate', { method: 'POST' });
+        const data = await response.json();
+        if (response.ok) {
+            alert(data.message);
+            currentStatusSpan.textContent = '任务已终止';
+            // 隐藏所有控制按钮
+            pauseBtn.style.display = 'none';
+            resumeBtn.style.display = 'none';
+            terminateBtn.style.display = 'none';
+        } else {
+            alert(`错误: ${data.error}`);
+        }
+    } catch (error) {
+        alert(`请求失败: ${error.message}`);
+    }
+});
 // ✅ 根据状态自动控制按钮显示
 function updatePauseResumeButtons(currentStatus) {
+    // 默认隐藏所有控制按钮
+    pauseBtn.style.display = 'none';
+    resumeBtn.style.display = 'none';
+    terminateBtn.style.display = 'none';
+
     if (currentStatus === '正在转换') {
         pauseBtn.style.display = 'inline-block';
-        pauseBtn.disabled = false;
-        resumeBtn.style.display = 'none';
+        terminateBtn.style.display = 'inline-block';
     } else if (currentStatus === '已暂停') {
-        pauseBtn.style.display = 'none';
         resumeBtn.style.display = 'inline-block';
-    } else {
-        pauseBtn.style.display = 'none';
-        resumeBtn.style.display = 'none';
+        terminateBtn.style.display = 'inline-block';
     }
+    // 其他状态（如“空闲”、“转换完成”、“任务已终止”）不显示按钮
 }
 
 // 上传主函数
@@ -813,7 +840,7 @@ function buildAdditionalArgs() {
     if (depthModel !== 'ZoeD_Any_N') args.push(`--depth-model ${depthModel}`);
 
     const videoCodec = document.getElementById('videoCodec').value;
-    if (videoCodec !== 'h265') args.push(`--video-codec ${videoCodec}`);
+    if (videoCodec !== 'none') args.push(`--video-codec ${videoCodec}`);
 
     // 手动输入部分（追加）
     const manualArgs = document.getElementById('additional_args').value.trim();

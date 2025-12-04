@@ -24,4 +24,6 @@ pip install -r requirements.txt
 ```cmd
 python main.py
 ```
-然后你就可以访问localhost:上面设置的端口来使用IW3 Web GUI了
+然后你就可以访问localhost:上面设置的端口来使用IW3 Web GUI了  
+### Tips  
+更换项目文件夹/static/images/background.png可以修改背景图片

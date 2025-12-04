@@ -12,7 +12,14 @@ from flask import Flask, render_template, request, redirect, url_for, send_file,
 from werkzeug.utils import secure_filename
 from config import Config
 current_conversion_pid = None
+# 当前正在处理的任务元数据（用于终止时清理）
+current_task_metadata = {
+    'input_path': None,
+    'original_filename': None
+}
+current_task_lock = threading.Lock()
 conversion_pid_lock = threading.Lock()
+task_control_lock = threading.Lock()
 from converter import convert_file, manage_storage
 from onedrive_client import one_drive_client
 app = Flask(__name__)
@@ -29,6 +36,7 @@ def allowed_file(filename):
 
 # 文件队列和线程锁
 conversion_queue = queue.Queue()
+worker_wakeup_event = threading.Event()
 status_lock = threading.Lock()
 status_info = {
     'processing': False,
@@ -280,30 +288,34 @@ def save_queue_state():
     except Exception as e:
         print(f"保存队列状态失败: {e}")
 def conversion_worker():
-    """后台转换工作线程"""
     print(" conversion_worker 线程已启动，等待任务...")
     while True:
         task = None
-        # 仅在锁内检查状态和获取任务
-        with status_lock:
+
+        # === 关键：原子地取出任务并设置元数据 ===
+        with task_control_lock:
             if not status_info['processing'] and not conversion_queue.empty():
                 try:
                     task = conversion_queue.get_nowait()
+                    # 设置状态
                     status_info['processing'] = True
                     status_info['current_file'] = task['original_filename']
                     status_info['current_status'] = '正在转换'
-                    # 从上传列表移除
                     if task['original_filename'] in status_info['uploaded_files']:
                         status_info['uploaded_files'].remove(task['original_filename'])
+                    # 设置当前任务元数据（用于终止）
+                    current_task_metadata['input_path'] = task['input_path']
+                    current_task_metadata['original_filename'] = task['original_filename']
                 except queue.Empty:
-                    pass  # 不可能，但安全起见
+                    pass
 
-        # 在锁外处理任务
         if task is None:
-            time.sleep(0.5)  # 避免 CPU 占满
+            worker_wakeup_event.wait(timeout=0.5)
+            worker_wakeup_event.clear()
             continue
 
         print(f" 开始处理任务: {task['original_filename']}")
+        # 注意：不再在这里设置 current_task_metadata！已在上面设置
 
         input_path = task['input_path']
         original_filename = task['original_filename']
@@ -312,7 +324,7 @@ def conversion_worker():
 
         success, message = convert_file(input_path, output_path, additional_args)
 
-        # 更新状态
+        # 处理完成后，清除 processing 状态（不需要清除 metadata，因为 terminate 只在 processing=True 时有效）
         with status_lock:
             if success:
                 status_info['current_status'] = '转换完成'
@@ -321,22 +333,34 @@ def conversion_worker():
                 manage_storage()
             else:
                 status_info['current_status'] = f'转换失败: {message}'
-                if os.path.exists(input_path) and original_filename not in status_info['uploaded_files']:
-                    status_info['uploaded_files'].append(original_filename)
+                # 删除原始上传文件（如果存在）
+                if os.path.exists(input_path):
+                    try:
+                        os.remove(input_path)
+                        print(f"[清理] 转换失败，已删除原始文件: {input_path}")
+                    except Exception as e:
+                        print(f"[警告] 无法删除失败文件 {input_path}: {e}")
+                # ❌ 不再将文件加回 uploaded_files（彻底移除）
             status_info['processing'] = False
             status_info['current_file'] = None
 
+        # 清除当前任务元数据（可选，但建议做）
+        with current_task_lock:
+            current_task_metadata['input_path'] = None
+            current_task_metadata['original_filename'] = None
+
         conversion_queue.task_done()
         print(f" 任务完成: {original_filename}, 成功: {success}")
-
-        # 保存状态
-        # ✅ 只更新 processing 状态，不修改 queue
+        save_queue_state()
+        # 保存状态...
         state = load_persistent_state() or {}
-        state['processing'] = status_info['processing']
-        state['current_file'] = status_info['current_file']
-        state['current_status'] = status_info['current_status']
-        state['uploaded_files'] = status_info['uploaded_files'].copy()
-        state['converted_files'] = status_info['converted_files'].copy()
+        state.update({
+            'processing': False,
+            'current_file': None,
+            'current_status': status_info['current_status'],
+            'uploaded_files': status_info['uploaded_files'].copy(),
+            'converted_files': status_info['converted_files'].copy()
+        })
         save_persistent_state(state)
 @app.route('/upload_direct', methods=['POST'])
 def upload_direct():
@@ -559,12 +583,16 @@ def delete_uploaded(filename):
         if os.path.exists(task_to_remove['input_path']):
             os.remove(task_to_remove['input_path'])
         
-        # ✅ 保存队列状态
-        save_queue_state()
+        save_queue_state()  # 队列状态已保存
     
+    # 更新 uploaded_files 并持久化
     with status_lock:
         if filename in status_info['uploaded_files']:
             status_info['uploaded_files'].remove(filename)
+            # ✅ 关键：保存整个状态，包括 updated uploaded_files
+            state = load_persistent_state() or {}
+            state['uploaded_files'] = status_info['uploaded_files'].copy()
+            save_persistent_state(state)
             
     return redirect(url_for('index'))
 
@@ -721,6 +749,110 @@ def resume_conversion():
             return jsonify({"error": "转换进程已结束或不存在"}), 400
         except Exception as e:
             return jsonify({"error": f"恢复异常: {str(e)}"}), 500
+# === 新增：终止当前转换任务 ===
+@app.route('/api/terminate', methods=['POST'])
+def terminate_conversion():
+    # 先检查是否真的有任务在运行
+    with status_lock:
+        if not status_info['processing']:
+            return jsonify({"error": "当前没有正在运行的转换任务"}), 400
+
+    # ✅ 关键：在 task_control_lock 内读取 metadata 并终止，防止被 worker 切换
+    with task_control_lock:
+        # 再次确认仍在 processing（双重保险）
+        with status_lock:
+            if not status_info['processing']:
+                return jsonify({"error": "任务已在终止前完成"}), 400
+
+        pid = current_module.current_conversion_pid
+        if pid is None:
+            return jsonify({"error": "当前没有有效的转换进程 PID"}), 400
+
+        try:
+            parent = psutil.Process(pid)
+            if not parent.is_running():
+                current_module.current_conversion_pid = None
+                return jsonify({"error": "转换进程已结束"}), 400
+
+            children = parent.children(recursive=True)
+            all_procs = [parent] + children
+
+            for proc in all_procs:
+                try:
+                    if proc.is_running():
+                        proc.terminate()
+                except psutil.NoSuchProcess:
+                    pass
+
+            gone, alive = psutil.wait_procs(all_procs, timeout=3)
+            for proc in alive:
+                try:
+                    proc.kill()
+                except psutil.NoSuchProcess:
+                    pass
+
+            current_module.current_conversion_pid = None
+
+            # ✅ 在同一锁内读取 metadata，确保是“当前正在处理”的任务
+            input_path_to_delete = current_task_metadata['input_path']
+            original_filename = current_task_metadata['original_filename']
+            tmp_output_to_delete = os.path.join(Config.CONVERTED_FOLDER, f"_tmp_{original_filename}") if original_filename else None
+
+            # 清空 metadata
+            current_task_metadata['input_path'] = None
+            current_task_metadata['original_filename'] = None
+
+            deleted_files = []
+            if input_path_to_delete and os.path.exists(input_path_to_delete):
+                try:
+                    os.remove(input_path_to_delete)
+                    deleted_files.append(input_path_to_delete)
+                    print(f"[清理] 已删除输入文件: {input_path_to_delete}")
+                except Exception as e:
+                    print(f"[清理] 删除输入文件失败: {e}")
+
+            if tmp_output_to_delete and os.path.exists(tmp_output_to_delete):
+                try:
+                    os.remove(tmp_output_to_delete)
+                    deleted_files.append(tmp_output_to_delete)
+                    print(f"[清理] 已删除临时输出文件: {tmp_output_to_delete}")
+                except Exception as e:
+                    print(f"[清理] 删除临时输出文件失败: {e}")
+
+            # ✅ 新增：从 uploaded_files 中移除被终止的文件名
+            if original_filename:
+                with status_lock:
+                    if original_filename in status_info['uploaded_files']:
+                        status_info['uploaded_files'].remove(original_filename)
+
+            # 更新状态
+            with status_lock:
+                status_info['processing'] = False
+                status_info['current_file'] = None
+                status_info['current_status'] = '任务已终止'
+
+            # 同步到持久化状态
+            state = load_persistent_state() or {}
+            state.update({
+                'processing': False,
+                'current_file': None,
+                'current_status': '任务已终止',
+                'uploaded_files': status_info['uploaded_files'].copy(),
+                'converted_files': status_info['converted_files'].copy()
+            })
+            save_persistent_state(state)
+
+            worker_wakeup_event.set()
+            return jsonify({
+                "message": f"已终止 {len(all_procs)} 个进程，并清理了 {len(deleted_files)} 个临时文件",
+                "deleted_files": deleted_files
+            }), 200
+
+        except psutil.NoSuchProcess:
+            current_module.current_conversion_pid = None
+            return jsonify({"error": "转换进程已结束"}), 400
+        except Exception as e:
+            return jsonify({"error": f"终止异常: {str(e)}"}), 500
 if __name__ == '__main__':
     # 启动时清理临时文件
     print("正在清理临时文件...")
