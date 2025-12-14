@@ -568,21 +568,20 @@ function updatePauseResumeButtons(currentStatus) {
 }
 
 // 上传主函数
+// 分块上传最大重试次数
+const MAX_RETRY = 3;
+
 async function uploadFile() {
     const method = uploadMethodSelect.value;
-
-    // 重置 session_id（新任务）
-    sessionId = null;
+    sessionId = null; // 新任务重置 session_id
 
     if (method === 'file') {
-        // ========== 本地文件上传（分块） ==========
         const file = fileInput.files[0];
         if (!file) {
             alert('请先选择一个文件');
             return;
         }
 
-        // 校验文件类型
         const fileExtension = file.name.split('.').pop().toLowerCase();
         if (!['mp4', 'avi', 'mkv'].includes(fileExtension)) {
             alert(`不支持的文件格式: .${fileExtension}\n\n仅支持：.mp4, .avi, .mkv`);
@@ -596,63 +595,83 @@ async function uploadFile() {
         additionalArgsInput.disabled = true;
         uploadMethodSelect.disabled = true;
 
-        // 显示进度条
         uploadProgress.style.display = 'block';
         progressText.textContent = '准备上传...';
 
-        try {
-            const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-            let uploadedChunks = 0;
+        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+        let uploadedChunks = 0;
+        let currentChunkIndex = 0; // 断点位置
 
-            for (let i = 0; i < totalChunks; i++) {
-                const start = i * CHUNK_SIZE;
-                const end = Math.min(start + CHUNK_SIZE, file.size);
-                const chunk = file.slice(start, end);
+        // 尝试上传所有 chunk，支持失败重试
+        while (currentChunkIndex < totalChunks) {
+            const start = currentChunkIndex * CHUNK_SIZE;
+            const end = Math.min(start + CHUNK_SIZE, file.size);
+            const chunk = file.slice(start, end);
 
-                const formData = new FormData();
-                formData.append('chunk', chunk);
-                formData.append('filename', file.name);
-                formData.append('chunk_index', i);
-                formData.append('total_chunks', totalChunks);
-                formData.append('additional_args', buildAdditionalArgs());
+            let retryCount = 0;
+            let success = false;
 
-                if (sessionId) {
-                    formData.append('session_id', sessionId);
+            while (retryCount <= MAX_RETRY && !success) {
+                try {
+                    const formData = new FormData();
+                    formData.append('chunk', chunk);
+                    formData.append('filename', file.name);
+                    formData.append('chunk_index', currentChunkIndex);
+                    formData.append('total_chunks', totalChunks);
+                    formData.append('additional_args', buildAdditionalArgs());
+
+                    if (sessionId) {
+                        formData.append('session_id', sessionId);
+                    }
+
+                    const response = await fetch('/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    const result = await response.json();
+
+                    if (!response.ok) {
+                        throw new Error(result.error || `HTTP ${response.status}`);
+                    }
+
+                    // 首次成功获取 session_id
+                    if (!sessionId && result.session_id) {
+                        sessionId = result.session_id;
+                    }
+
+                    success = true;
+                    uploadedChunks++;
+                    const percent = Math.round((uploadedChunks / totalChunks) * 100);
+                    progressBar.style.width = `${percent}%`;
+                    progressText.textContent = `上传中: ${uploadedChunks}/${totalChunks} (${percent}%)`;
+
+                } catch (error) {
+                    retryCount++;
+                    console.warn(`Chunk ${currentChunkIndex} 上传失败，第 ${retryCount} 次重试...`, error);
+                    if (retryCount > MAX_RETRY) {
+                        throw new Error(`Chunk ${currentChunkIndex} 重试 ${MAX_RETRY} 次后仍失败: ${error.message}`);
+                    }
+                    // 等待 1 秒后重试（可选）
+                    await new Promise(r => setTimeout(r, 1000));
                 }
-
-                const response = await fetch('/upload', {
-                    method: 'POST',
-                    body: formData
-                });
-
-                const result = await response.json();
-
-                if (!response.ok) {
-                    throw new Error(result.error || '上传失败');
-                }
-
-                if (!sessionId && result.session_id) {
-                    sessionId = result.session_id;
-                }
-
-                uploadedChunks++;
-                const percent = Math.round((uploadedChunks / totalChunks) * 100);
-                progressBar.style.width = `${percent}%`;
-                progressText.textContent = `上传中: ${uploadedChunks}/${totalChunks} (${percent}%)`;
             }
 
-            alert('文件上传成功，已加入转换队列！');
-            resetUploadUI();
-            fetchStatusAndFiles();
+            if (!success) {
+                // 不应到达这里，因为上面 throw 了
+                break;
+            }
 
-        } catch (error) {
-            console.error('上传错误:', error);
-            alert(`上传失败: ${error.message}`);
-            resetUploadUI();
+            currentChunkIndex++; // 只有成功才前进
         }
 
+        // 全部上传完成
+        alert('✅ 文件上传成功，已加入转换队列！');
+        resetUploadUI();
+        fetchStatusAndFiles();
+
     } else if (method === 'url') {
-        // ========== 直链上传 ==========
+        // ========== 直链上传（不变）==========
         const directUrl = document.getElementById('directUrl').value.trim();
         let filename = document.getElementById('customFilename').value.trim();
 
@@ -661,29 +680,21 @@ async function uploadFile() {
             return;
         }
 
-        // 解析文件名（若未自定义）
         if (!filename) {
             const urlParts = directUrl.split('/');
-            filename = decodeURIComponent(urlParts[urlParts.length - 1]);
-
-            // 去除查询参数
-            filename = filename.split('?')[0].split('#')[0];
+            filename = decodeURIComponent(urlParts[urlParts.length - 1]).split('?')[0].split('#')[0];
             if (!filename) {
                 alert('无法从链接中解析出有效的文件名');
                 return;
             }
         }
 
-        // 提取扩展名并小写化
         const fileExt = filename.split('.').pop().toLowerCase();
-
-        // ✅ 严格校验扩展名
         if (!['mp4', 'avi', 'mkv'].includes(fileExt)) {
-            alert(`不支持的文件格式: .${fileExt}\n\n仅支持以下格式：\n.mp4, .avi, .mkv`);
+            alert(`不支持的文件格式: .${fileExt}\n\n仅支持：.mp4, .avi, .mkv`);
             return;
         }
 
-        // 禁用 UI
         uploadBtn.disabled = true;
         uploadBtn.textContent = '正在添加直链任务...';
         uploadMethodSelect.disabled = true;
@@ -692,9 +703,7 @@ async function uploadFile() {
         try {
             const response = await fetch('/upload_direct', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     url: directUrl,
                     filename: filename,
@@ -703,7 +712,6 @@ async function uploadFile() {
             });
 
             const result = await response.json();
-
             if (response.ok) {
                 alert('✅ 直链任务已添加，正在后台下载并排队转换！');
                 resetUploadUI();

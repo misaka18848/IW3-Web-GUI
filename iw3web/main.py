@@ -11,11 +11,15 @@ import main as current_module
 from flask import Flask, render_template, request, redirect, url_for, send_file, flash, jsonify, Response, abort
 from werkzeug.utils import secure_filename
 from config import Config
+import signal
+import sys
+
 current_conversion_pid = None
 # 当前正在处理的任务元数据（用于终止时清理）
 current_task_metadata = {
     'input_path': None,
-    'original_filename': None
+    'original_filename': None,
+    'additional_args': ''
 }
 current_task_lock = threading.Lock()
 conversion_pid_lock = threading.Lock()
@@ -124,6 +128,60 @@ def restore_processing_queue():
             print(f"恢复了 {len(state['uploaded_files'])} 个已上传文件列表")
     else:
         print("无持久化队列数据，跳过恢复")
+def cleanup_orphaned_upload_files():
+    """
+    启动时清理 UPLOAD_FOLDER 中未被 queue 记录的文件和临时上传目录。
+    - 保留 queue 中 input_path 指向的文件
+    - 删除其他所有文件和以 _upload_ 开头的目录（分块上传残留）
+    """
+    print("正在清理 UPLOAD_FOLDER 中的孤立文件和无效上传目录...")
+
+    # 1. 加载持久化状态中的 queue
+    state = load_persistent_state()
+    valid_input_paths = set()
+    if state and 'queue' in state:
+        for task in state['queue']:
+            input_path = task.get('input_path')
+            if input_path and os.path.exists(input_path):
+                # 规范化路径，避免因大小写或符号链接导致误删
+                valid_input_paths.add(os.path.abspath(input_path))
+    
+    print(f"队列中记录的有效输入文件数: {len(valid_input_paths)}")
+
+    # 2. 遍历 UPLOAD_FOLDER
+    upload_folder = Config.UPLOAD_FOLDER
+    if not os.path.exists(upload_folder):
+        print("UPLOAD_FOLDER 不存在，跳过清理")
+        return
+
+    deleted_count = 0
+    for item in os.listdir(upload_folder):
+        item_path = os.path.join(upload_folder, item)
+        abs_item_path = os.path.abspath(item_path)
+
+        # 情况1: 是文件
+        if os.path.isfile(item_path):
+            if abs_item_path not in valid_input_paths:
+                try:
+                    os.remove(item_path)
+                    print(f"🗑️ 删除孤立上传文件: {item}")
+                    deleted_count += 1
+                except Exception as e:
+                    print(f"❌ 无法删除文件 {item}: {e}")
+
+        # 情况2: 是目录，且是分块上传临时目录（以 _upload_ 开头）
+        elif os.path.isdir(item_path) and item.startswith('_upload_'):
+            # 这类目录不应出现在 queue 的 input_path 中（input_path 指向合并后的文件）
+            # 所以直接删除整个目录
+            try:
+                import shutil
+                shutil.rmtree(item_path)
+                print(f"🗑️ 删除孤立上传会话目录: {item}")
+                deleted_count += 1
+            except Exception as e:
+                print(f"❌ 无法删除目录 {item}: {e}")
+
+    print(f"清理完成，共删除 {deleted_count} 个孤立文件/目录")
 def restore_converted_files_to_onedrive():
     """
     启动时检查本地 converted 文件夹中是否有未上传到 OneDrive 的文件，
@@ -306,6 +364,7 @@ def conversion_worker():
                     # 设置当前任务元数据（用于终止）
                     current_task_metadata['input_path'] = task['input_path']
                     current_task_metadata['original_filename'] = task['original_filename']
+                    current_task_metadata['additional_args'] = task.get('additional_args', '')
                 except queue.Empty:
                     pass
 
@@ -853,21 +912,171 @@ def terminate_conversion():
             return jsonify({"error": "转换进程已结束"}), 400
         except Exception as e:
             return jsonify({"error": f"终止异常: {str(e)}"}), 500
-if __name__ == '__main__':
-    # 启动时清理临时文件
-    print("正在清理临时文件...")
-    cleanup_temp_files()
-    
-    # 恢复处理队列
-    print("正在恢复处理队列...")
-    restore_processing_queue()
-    print("正在恢复已转换但未上传的文件到 OneDrive...")
-    upload_restore_thread = threading.Thread(target=restore_converted_files_to_onedrive, daemon=True)
-    upload_restore_thread.start()  # 新增：上传本地已转换文件
-    initialize_converted_files()
-    # 启动后台转换线程
-    worker_thread = threading.Thread(target=conversion_worker, daemon=True)
-    worker_thread.start()
-    
+def save_current_task_if_processing():
+    """如果当前有正在处理的任务，将其放回队列并持久化"""
+    with status_lock:
+        processing = status_info['processing']
+        current_file = status_info['current_file']
 
-    app.run(host='0.0.0.0',debug=True, threaded=True,port=8000,use_reloader=False)
+    if not processing or not current_file:
+        return
+
+    print("检测到正在转换的任务，正在保存回队列...")
+
+    # 安全读取 current_task_metadata
+    with current_task_lock:
+        meta = current_task_metadata.copy()
+
+    if not meta['original_filename']:
+        print("警告：无法获取当前任务元数据，跳过保存")
+        return
+
+    # 构造任务
+    task = {
+        'input_path': meta['input_path'],
+        'original_filename': meta['original_filename'],
+        'stored_filename': os.path.basename(meta['input_path']) if meta['input_path'] else meta['original_filename'],
+        'additional_args': meta['additional_args']
+    }
+
+    # 放回队列头部（优先处理）
+    temp_queue = queue.Queue()
+    temp_queue.put(task)
+    while not conversion_queue.empty():
+        temp_queue.put(conversion_queue.get())
+    while not temp_queue.empty():
+        conversion_queue.put(temp_queue.get())
+
+    print(f"已将任务 '{meta['original_filename']}' 保存回队列")
+
+    # 保存完整状态（包括 uploaded_files，注意：正在处理的文件不应在 uploaded_files 中）
+    with status_lock:
+        # 确保 uploaded_files 不包含当前文件（它正在处理，不属于“排队”）
+        safe_uploaded = [f for f in status_info['uploaded_files'] if f != meta['original_filename']]
+        state = {
+            'queue': list(conversion_queue.queue),
+            'uploaded_files': safe_uploaded,
+            'converted_files': status_info['converted_files'].copy(),
+            'processing': False,  # 强制设为 False，因为即将退出
+            'current_file': None,
+            'current_status': '已中断'
+        }
+    save_persistent_state(state)
+    print("持久化状态已更新，包含中断的任务")
+if __name__ == '__main__':
+    # === 1. 日志重定向 ===
+    from datetime import datetime
+    LOG_FILE = 'app.log'
+    MAX_LOG_LINES = 10000
+
+    class LimitedLogWriter:
+        def __init__(self, filename, max_lines=10000):
+            self.filename = filename
+            self.max_lines = max_lines
+            self.ensure_log_exists()
+
+        def ensure_log_exists(self):
+            if not os.path.exists(self.filename):
+                with open(self.filename, 'w', encoding='utf-8') as f:
+                    f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 日志开始\n")
+
+        def write(self, message):
+            if message.strip() == "":
+                return
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            log_line = f"[{timestamp}] {message.rstrip()}\n"
+
+            lines = []
+            if os.path.exists(self.filename):
+                try:
+                    with open(self.filename, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
+                except:
+                    lines = []
+
+            lines.append(log_line)
+            if len(lines) > self.max_lines:
+                lines = lines[-self.max_lines:]
+
+            try:
+                with open(self.filename, 'w', encoding='utf-8') as f:
+                    f.writelines(lines)
+            except Exception as e:
+                pass  # 避免日志写入失败导致崩溃
+
+        def flush(self):
+            pass
+
+    # 重定向标准输出和错误
+    sys.stdout = LimitedLogWriter(LOG_FILE, MAX_LOG_LINES)
+    sys.stderr = LimitedLogWriter(LOG_FILE, MAX_LOG_LINES)
+
+    print("=== 应用启动 ===")
+
+    # === 2. 隐藏控制台窗口 (Windows only) ===
+    import platform
+    if platform.system() == "Windows":
+        import ctypes
+        ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
+
+    # === 3. 托盘图标相关 ===
+    import webbrowser
+    from threading import Thread
+    try:
+        from pystray import Icon, Menu, MenuItem
+        from PIL import Image, ImageDraw
+    except ImportError:
+        print("缺少依赖：请运行 `pip install pystray pillow`")
+        sys.exit(1)
+
+    def create_image():
+        return Image.open("static/images/icon.png")
+
+    def open_browser(icon, item):
+        webbrowser.open(f"http://localhost:{app.config['FLASK_PORT']}")
+
+    def exit_app(icon, item):
+        save_current_task_if_processing()
+        icon.stop()
+        print("用户通过托盘退出程序")
+        os._exit(0)  # 强制退出（确保 Flask 线程终止）
+
+    # === 4. 启动后台服务 ===
+    def run_flask():
+        # 清理 & 恢复状态
+        print("正在清理临时文件...")
+        cleanup_temp_files()
+        print("正在恢复处理队列...")
+        restore_processing_queue()
+        cleanup_orphaned_upload_files()
+        print("正在初始化已转换文件列表...")
+        initialize_converted_files()
+        upload_restore_thread = threading.Thread(target=restore_converted_files_to_onedrive, daemon=True)
+        upload_restore_thread.start()
+
+        # 启动工作线程
+        worker_thread = threading.Thread(target=conversion_worker, daemon=True)
+        worker_thread.start()
+
+        # 启动 Flask（不使用 reloader）
+        app.run(host='0.0.0.0', port=app.config['FLASK_PORT'], debug=False, threaded=True, use_reloader=False)
+
+    flask_thread = Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+
+    # 等待 Flask 启动后再打开浏览器（避免 404）
+    time.sleep(2)
+    webbrowser.open(f"http://localhost:{app.config['FLASK_PORT']}")
+
+    # === 5. 启动托盘图标 ===
+    icon = Icon(
+        name="VideoConverter",
+        icon=create_image(),
+        title="IW3 Web GUI",
+        menu=Menu(
+            MenuItem("打开网页", open_browser),
+            MenuItem("退出", exit_app)
+        )
+    )
+    print("托盘图标已启动")
+    icon.run()  # 阻塞主线程，保持程序运行

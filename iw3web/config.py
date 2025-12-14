@@ -31,6 +31,8 @@ class Config:
     STOP_TIME_START = dt_time(23, 0)   # 23:00
     STOP_TIME_END = dt_time(3, 0)      # 03:00 (次日)
     MIN_SLEEP = 10 # 最小 sleep 时间（秒），防止误差
+    # 网页端口
+    FLASK_PORT = 8000  
 
 # 确保目录存在
 os.makedirs(Config.UPLOAD_FOLDER, exist_ok=True)
